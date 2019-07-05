@@ -1,1 +1,5 @@
 RPi.Gpio
+Adafruit_DHT
+time
+requests
+os

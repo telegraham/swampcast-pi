@@ -1,32 +1,58 @@
 #!/usr/bin/python
 
 import RPi.GPIO as GPIO
+import Adafruit_DHT
 import time
-#import logging
+import requests
+import os
 
-#logging.basicConfig(format='%(levelname)s-%(asctime)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.DEBUG,filename='/App/gpio.log')
+import logging
+logging.basicConfig(filename='tempy.log',level=logging.WARNING,format='%(asctime)s %(message)s',datefmt='%m/%d/%Y %I:%M:%S %p')
 
-# Set GPIO mode: GPIO.BCM or GPIO.BOARD
-GPIO.setmode(GPIO.BOARD)
+auth_token = os.environ['AUTHORIZATION_TOKEN']
 
-# GPIO pins list based on GPIO.BOARD
-gpioList1 = [3,5,7,8,10,11,12,13,15]
-gpioList2 = [16,18,19,21,22,23,24,26]
+sensor = Adafruit_DHT.DHT22
+pin = 4
 
-# Set mode for each gpio pin
-GPIO.setup(gpioList1, GPIO.OUT)
-GPIO.setup(gpioList2, GPIO.OUT)
+def get_readings():
+  humidity, temperature = Adafruit_DHT.read_retry(sensor, pin)
+  return { "humidity": float(humidity), "temperature": float(temperature) }
 
-while True:
-	# Change gpio pins in list 1 from low to high and list 2 from high to low
-	GPIO.output(gpioList1, 1)
-	GPIO.output(gpioList2, 0)
-	time.sleep(1)
+def hit_api(dict):
+  r = requests.post(url = "https://tempapi-backend.herokuapp.com/locations/turing/readings", 
+                    params = dict,
+                    headers = { "Authorization": auth_token })  
 
-	# Change gpio pin in list 1 from high to low and list 2 from low to high
-	GPIO.output(gpioList1, 0)
-	GPIO.output(gpioList2, 1)
-	time.sleep(1)
+error_count = 0
 
-# Reset all gpio pin
-GPIO.cleanup()
+def do_the_thing():
+  global error_count
+  logging.debug("starting...")
+  while True:
+    try:
+      readings = get_readings()
+      hit_api(readings)
+      if error_count > 0:
+        logging.warning("Successful fetch, resetting error count")
+      error_count = 0
+      time.sleep(5)
+    except KeyboardInterrupt:
+      logging.error("keyboard interrupt")
+      GPIO.cleanup()
+      print('bye')
+      continue
+    except Exception as e:
+      logging.exception("error")
+      error_count += 1
+      logging.warning("{error_count} errors since last success".format(error_count=error_count))
+      #print error_count
+      if error_count > 100:
+        logging.error("100+ errors, exiting")
+        GPIO.cleanup()
+        return
+      sleep_timeout = 60 + 1.7 ** error_count
+      logging.warning("sleeping {sleep_timeout}".format(sleep_timeout=sleep_timeout))
+      time.sleep(sleep_timeout)
+
+do_the_thing()
+
